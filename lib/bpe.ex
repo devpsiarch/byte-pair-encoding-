@@ -7,7 +7,7 @@ defmodule Bpe do
   @spec decode({String.t(),[Map]}) :: {String.t()}
   @spec walk(String.t(), acc :: Map) :: Map 
   @spec replace(String.t(),table :: Map,String.t()) :: String.t()
-  @spec split_content(String.t(),integer()) :: Map
+  @spec split_content(String.t(),integer()) :: List
   
   def encode(str,rng) do
     init = str |> String.downcase()
@@ -22,7 +22,7 @@ defmodule Bpe do
           |> elem(0)
         # the replacing can be split to be handle by many threads
         # then concatenating the results in order
-        new_content = async_replace(content,max_chunk,<<x>>,2)
+        new_content = async_replace(content,max_chunk,<<x>>,10)
         IO.puts("epoch done ...")
         {new_content,[{<<x>>,max_chunk} | table_acc]}
       end)
@@ -52,14 +52,16 @@ defmodule Bpe do
 
   def async_replace(content,pattern,rep,n) do
     parts = split_content(content,n)
-    # we create the pool 
-    pool = Repserver.init_pool(n)
-    Enum.each(1..n,fn id -> 
-      Repserver.assign_rep_job(pool,id,Map.get(parts,id),pattern,rep) 
+
+    tasks = parts
+    |>  Enum.reduce([],fn x, acc ->
+        [Task.async(fn -> String.replace(x,pattern,rep) end) | acc] 
+        end)
+
+    Enum.reduce(Enum.reverse(tasks), "", fn t, acc ->
+      acc <> Task.await(t)
     end)
-    collected_result = Repserver.collect(n)
-    Repserver.kill_pool(pool)
-    collected_result
+
   end
 
   def read_lines(path,n) do
@@ -72,25 +74,34 @@ defmodule Bpe do
   
   def split_content(content,max) do
     total_len = String.length(content)
+    # IO.puts("Total length: #{total_len}")
     part_len = total_len |> div(max)
+
     if part_len <= 1 do
-      %{1 => content}
-    else 
-      Enum.reduce(1..max,%{},fn x,acc -> 
-        if x == max do
-          Map.put(acc,x,String.slice(content,(x-1)*part_len,total_len))
+      [content]
+    else
+      Enum.reduce(0..max-1,[],fn x,acc ->
+        if x*part_len+part_len+1 >= total_len do
+          [String.slice(content, (x*part_len)..-1)|acc]  
         else
-          Map.put(acc,x,String.slice(content,(x-1)*part_len,x*part_len))
+          [String.slice(content,x*part_len,part_len)|acc]  
         end
       end)
-    end 
+      |> Enum.reverse()
+    end
   end 
-
-  
 end
 
 encode_text = fn -> "input.txt"
-  |> Bpe.read_lines(15_000) 
+  |> Bpe.read_lines(1_000)
   |> Bpe.encode(?A..?Z) 
+  |> IO.inspect
 end 
 encode_text |> Benchmark.time() |> IO.inspect()
+
+# "input.txt" 
+# |> Bpe.read_lines(100) 
+# |> Bpe.async_replace("h","H",10)
+# |> IO.inspect()
+# 
+# IO.puts("DONE")

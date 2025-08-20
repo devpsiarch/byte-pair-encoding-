@@ -50,6 +50,6 @@ defmodule Repserver do
   end
 
   def collect(samples) do 
-    Enum.reduce(1..samples,"",fn id,acc -> acc <> get_some_result(id) end) 
+    Enum.reduce(1..samples,"",fn _id,acc -> acc <> get_any_result() end) 
   end 
 end
